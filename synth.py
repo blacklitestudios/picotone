@@ -72,8 +72,12 @@ class PolyphonicSynth:
             # Check if frequency already playing (re-trigger)
             if frequency in self.active_notes:
                 voice_idx = self.active_notes[frequency][0]
+                # Restart the attack phase but keep phase continuous to avoid clicks
                 self.voices[voice_idx]['start_time'] = time.time()
+                self.voices[voice_idx]['note_duration'] = -1
+                # Don't reset phase to avoid waveform discontinuity/clicks
                 self.voices[voice_idx]['velocity'] = velocity
+                # Keep phase continuous - DO NOT reset to 0.0
                 return voice_idx
             
             # Find free voice
@@ -116,8 +120,10 @@ class PolyphonicSynth:
     
     def note_on(self, frequency, velocity=0.7):
         """Start playing a note"""
-        if len(self.active_notes) >= self.polyphony:
-            # Polyphony limit reached
+        print("on", frequency)
+        # Allow re-triggering of existing notes even if at polyphony limit
+        if frequency not in self.active_notes and len(self.active_notes) >= self.polyphony:
+            # Polyphony limit reached for new notes
             return False
         
         voice_idx = self.allocate_voice(frequency, velocity)
@@ -125,6 +131,7 @@ class PolyphonicSynth:
     
     def note_off(self, frequency):
         """Stop playing a note"""
+        print("off", frequency)
         with self.voice_lock:
             if frequency in self.active_notes:
                 voice_idx = self.active_notes[frequency][0]
@@ -142,47 +149,73 @@ class PolyphonicSynth:
         wave_func = self.get_wave_function(self.waveform)
         current_time = time.time()
         
+        # Copy voice state quickly under lock to minimize contention
         with self.voice_lock:
-            # Process each active voice
-            voices_to_remove = []
-            
+            # Create snapshot of active voices
+            active_voices_snapshot = []
             for i, voice in enumerate(self.voices):
-                if not voice['active']:
-                    continue
+                if voice['active']:
+                    active_voices_snapshot.append({
+                        'index': i,
+                        'frequency': voice['frequency'],
+                        'phase': voice['phase'],
+                        'start_time': voice['start_time'],
+                        'note_duration': voice['note_duration'],
+                        'velocity': voice['velocity']
+                    })
+        
+        # Generate audio outside the lock
+        voices_to_deactivate = []
+        voice_phase_updates = {}
+        
+        for voice_snapshot in active_voices_snapshot:
+            i = voice_snapshot['index']
+            freq = voice_snapshot['frequency']
+            phase = voice_snapshot['phase']
+            time_in_note = current_time - voice_snapshot['start_time']
+            
+            # Generate samples for this voice
+            voice_samples = np.zeros(num_samples, dtype=np.float32)
+            should_deactivate = False
+            
+            for j in range(num_samples):
+                # Calculate envelope
+                envelope = self.adsr_envelope(
+                    time_in_note + j/self.sample_rate,
+                    voice_snapshot['note_duration'],
+                    voice_snapshot['velocity']
+                )
                 
-                freq = voice['frequency']
-                phase = voice['phase']
-                time_in_note = current_time - voice['start_time']
+                if envelope <= 0.001:  # Voice is silent
+                    should_deactivate = True
+                    voices_to_deactivate.append((i, freq))
+                    break
                 
-                # Generate samples for this voice
-                voice_samples = np.zeros(num_samples, dtype=np.float32)
-                for j in range(num_samples):
-                    # Calculate envelope
-                    envelope = self.adsr_envelope(
-                        time_in_note + j/self.sample_rate,
-                        voice['note_duration'],
-                        voice['velocity']
-                    )
-                    
-                    if envelope <= 0.001:  # Voice is silent
-                        voice['active'] = False
-                        if freq in self.active_notes:
-                            del self.active_notes[freq]
-                        break
-                    
-                    # Generate waveform
-                    voice_samples[j] = wave_func(phase) * envelope * 0.3  # Volume scaling
-                    
-                    # Update phase
-                    phase += freq / self.sample_rate
-                    if phase >= 1.0:
-                        phase -= 1.0
+                # Generate waveform
+                voice_samples[j] = wave_func(phase) * envelope * 0.3  # Volume scaling
                 
-                # Update voice phase for next chunk
-                voice['phase'] = phase
-                
-                # Mix voice into output
-                samples += voice_samples
+                # Update phase
+                phase += freq / self.sample_rate
+                if phase >= 1.0:
+                    phase -= 1.0
+            
+            # Store phase update for later
+            voice_phase_updates[i] = phase
+            
+            # Mix voice into output
+            samples += voice_samples
+        
+        # Update voice states quickly under lock
+        with self.voice_lock:
+            for i, phase in voice_phase_updates.items():
+                if i < len(self.voices):
+                    self.voices[i]['phase'] = phase
+            
+            for i, freq in voices_to_deactivate:
+                if i < len(self.voices):
+                    self.voices[i]['active'] = False
+                    if freq in self.active_notes:
+                        del self.active_notes[freq]
         
         # Prevent clipping
         if np.max(np.abs(samples)) > 1.0:
@@ -213,7 +246,7 @@ class PolyphonicSynth:
             channels=1,
             rate=self.sample_rate,
             output=True,
-            frames_per_buffer=256,
+            frames_per_buffer=512,  # Increased from 256 to reduce crackling
             stream_callback=self.audio_callback
         )
         

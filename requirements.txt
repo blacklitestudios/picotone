@@ -1,0 +1,7 @@
+enum34==1.1.10
+numpy==2.4.2
+PyAudio==0.2.14
+pygame==2.6.1
+python-ranges==1.2.2
+scipy==1.17.0
+synthesizer==0.2.0

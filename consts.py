@@ -5,15 +5,17 @@ RED = (229, 139, 158)
 GREEN = (145, 219, 145)
 PURPLE = (186, 163, 235)
 YELLOW = (247, 203, 104)
+LIME = (181,181, 57)
 
 OCTAVE = 1
 PERFECTFIFTH = math.log(3/2, 2)
 MAJORTHIRD = math.log(5/4, 2)
 SEVENTH = math.log(7/4, 2)
 ELEVENTH = math.log(11/4, 2)
+THIRTEENTH = math.log(13/4, 2)
 
-RATIOS = [None, Fraction(2), Fraction(3/2), Fraction(5/4), Fraction(7/4), Fraction(11/4)]
-INTERVALLENGTHS = [None, OCTAVE, PERFECTFIFTH, MAJORTHIRD, SEVENTH, ELEVENTH]
+RATIOS = [None, Fraction(2), Fraction(3/2), Fraction(5/4), Fraction(7/4), Fraction(11/4), Fraction(13/4)]
+INTERVALLENGTHS = [None, OCTAVE, PERFECTFIFTH, MAJORTHIRD, SEVENTH, ELEVENTH, THIRTEENTH]
 
 def draw_dotted_line(surface, color, start_pos, end_pos, width=1, dash_length=10, gap_length=5):
     """

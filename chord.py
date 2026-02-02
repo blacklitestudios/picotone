@@ -38,7 +38,10 @@ class Note:
         self.parent = None
         
     def add_derivative(self, exponent, extent, is_silent=False):
-        note = Note([], is_silent, self.ratio*RATIOS[exponent]**extent)
+        new_ratio = self.ratio*RATIOS[exponent]**extent
+        if new_ratio in self.get_root().get_ratios():
+            return
+        note = Note([], is_silent, new_ratio)
         note.parent = self
         self.derivatives.append((exponent, extent, note))
 
@@ -48,6 +51,11 @@ class Note:
         for derivative in self.derivatives:
             new_ratio = ratio*RATIOS[derivative[0]]**derivative[1]
             derivative[2].set_ratio(new_ratio)
+
+    def get_root(self):
+        if self.parent:
+            return self.parent.get_root()
+        return self
 
     def get_ylevels(self, y, octheight):
         result = []
@@ -63,6 +71,14 @@ class Note:
             result.append(self)
         for derivative in self.derivatives:
             result += derivative[2].get_notes()
+        return result
+    
+    def get_ratios(self):
+        result = []
+        if True:
+            result.append(self.ratio)
+        for derivative in self.derivatives:
+            result += derivative[2].get_ratios()
         return result
     
     def get_notes_and_ylevels(self, y=0, octheight=1):
@@ -104,6 +120,8 @@ class Note:
         intervals: dict[Fraction, list[Range]] = {}
         bars: dict[Range, int] = {}
         layers: dict[Fraction, int] = {Fraction(1): 0}
+        bars_right: dict[Range, int] = {}
+        layers_right: dict[Fraction, int] = {Fraction(1): 0}
         notes[Fraction(1)] = self
         stack = [Fraction(1)]
         while stack:
@@ -116,7 +134,10 @@ class Note:
                 intervals[node].append(range)
                 if derivative[0] == 2:
                     bars[range] = layers[node]
+                if derivative[0] == 3:
+                    bars_right[range] = layers_right[node]
                 layers[ratio] = layers[node]
+                layers_right[ratio] = layers_right[node]
 
                 # check for collision
                 # if new node collides with bar:
@@ -124,6 +145,12 @@ class Note:
                     for bar in bars:
                         if ratio in bar and layers[ratio] == bars[bar]:
                             layers[ratio] += 1
+                            break
+                    else:
+                        break
+                    for bar in bars_right:
+                        if ratio in bar and layers_right[ratio] == bars_right[bar]:
+                            layers_right[ratio] += 1
                             break
                     else:
                         break
@@ -150,7 +177,8 @@ class Note:
                                             break
                                         if previous_parent.ratio / current_parent.ratio not in [Fraction(3, 2), Fraction(2, 3)]:
                                             break
-                                        layers[current_parent.ratio] += 1
+                                        if current_parent.ratio in layers.keys():
+                                            layers[current_parent.ratio] += 1
                                         parent_range = Range(min(current_parent.ratio, previous_parent.ratio), max(current_parent.ratio, previous_parent.ratio))
                                         if parent_range in bars.keys():
                                             bars[parent_range] += 1
@@ -161,11 +189,44 @@ class Note:
                                     stack.append(note)
 
                                 break
+                            
 
                         else:
                             break
+                if range in bars_right.keys():
+                    while True:
+                        for note in notes:
+
+                            if note in range and bars_right[range] == layers_right[note]:
+                                note_children = notes[note].get_notes()
+                                if notes[node] in note_children or derivative[0] == 3 and derivative[1] < 0:
+                                    layers_right[node] += 1
+                                    #layers[note]  = layers[node]
+                                    if range in bars_right.keys():
+                                        bars_right[range] += 1
+                                    current_parent = notes[node].parent
+                                    previous_parent = notes[node]
+                                    while True: # yes i do this a lot
+
+                                        if not current_parent:
+                                            break
+                                        if previous_parent.ratio / current_parent.ratio not in [Fraction(5, 4), Fraction(4, 5)]:
+                                            break
+                                        layers_right[current_parent.ratio] += 1
+                                        parent_range = Range(min(current_parent.ratio, previous_parent.ratio), max(current_parent.ratio, previous_parent.ratio))
+                                        if parent_range in bars_right.keys():
+                                            bars_right[parent_range] += 1
+                                        previous_parent = current_parent
+                                        current_parent = current_parent.parent
+                                else:
+                                    layers_right[note] += 1
+                                    stack.append(note)
+
+                                break
+                        else:
+                            break
         
-        return layers
+        return layers, layers_right
                         
                 
             
@@ -180,12 +241,14 @@ class Note:
         
     
     
-    def draw(self, window, x, y, width, octheight, thickness, layers, current_left=0, current_right=1, root=1):
+    def draw(self, window, x, y, width, octheight, thickness, layers, layers_right, current_left=0, current_right=1, root=1, highlighted=True, voicenum=0):
         bar_width = width // 10
+
+        LINE_COLOR = [i * (1 if highlighted==True else 3/4) for i in [(255, 255, 255), RED, GREEN, PURPLE, YELLOW, LIME][voicenum]]
         if not self.is_silent:
-            pygame.draw.line(window, (255, 255, 255), (x+width*current_left, y), (x+width*current_right, y), 3)
+            pygame.draw.line(window, LINE_COLOR, (x+width*current_left, y), (x+width*current_right, y), 3)
         else:
-            draw_dotted_line(window, (255, 255, 255), (x+width*current_left, y), (x+width*current_right, y), 3)
+            draw_dotted_line(window, LINE_COLOR, (x+width*current_left, y), (x+width*current_right, y), 3)
         #layers = self.precompute_positions()
         for derivative in self.derivatives:
             dimnum = derivative[0]
@@ -195,6 +258,7 @@ class Note:
             test_interval = None
                                 
             linedepthl = layers[ratio]
+            linedepthr = layers_right[ratio]
             if dimnum == 1:
                 if dimext > 0:
                     pygame.draw.rect(window, (128, 128, 128), pygame.Rect(x+width*1/2, y-OCTAVE*dimext*octheight, 1, OCTAVE*octheight*dimext))
@@ -216,8 +280,8 @@ class Note:
                 if dimext > 0:
                     pygame.draw.polygon(window, PURPLE, [(x+width*current_left, y), 
                                                          (x+width*current_left+bar_width, y), 
-                                                         (x+width*current_right, y-SEVENTH*dimext*octheight), 
-                                                         (x+width*current_right-bar_width, y-SEVENTH*dimext*octheight)])
+                                                         (x+width*(1-linedepthr*0.15), y-SEVENTH*dimext*octheight), 
+                                                         (x+width*(1-linedepthr*0.15)-bar_width, y-SEVENTH*dimext*octheight)])
                 if dimext < 0:
                     pygame.draw.polygon(window, PURPLE, [(x+width*current_right, y), 
                                                          (x+width*current_right-bar_width, y), 
@@ -236,13 +300,30 @@ class Note:
                                                          (x+width*current_right, y-ELEVENTH*dimext*octheight), 
                                                          (x+width*current_right-bar_width, y-ELEVENTH*dimext*octheight)])
 
+            if dimnum == 6:
+                if dimext > 0:
+                    pygame.draw.polygon(window, LIME, [(x+width*current_left, y), 
+                                                       (x+width*current_left+bar_width, y),
+                                                       (x+width*current_left-bar_width, y-THIRTEENTH/2*dimext*octheight),
+                                                       (x+width*current_left+bar_width, y-THIRTEENTH*dimext*octheight),
+                                                       (x+width*current_left, y-THIRTEENTH*dimext*octheight),
+                                                       (x+width*current_left-2*bar_width, y-THIRTEENTH/2*dimext*octheight),
+                                                       ])
+                if dimext < 0:
+                    pygame.draw.polygon(window, LIME, [(x+width*current_left, y), 
+                                                       (x+width*current_left+bar_width, y),
+                                                       (x+width*current_left-bar_width, y-THIRTEENTH/2*dimext*octheight),
+                                                       (x+width*current_left+bar_width, y-THIRTEENTH*dimext*octheight),
+                                                       (x+width*current_left, y-THIRTEENTH*dimext*octheight),
+                                                       (x+width*current_left-2*bar_width, y-THIRTEENTH/2*dimext*octheight),
+                                                       ])
 
 
 
 
 
 
-            node.draw(window, x, y - INTERVALLENGTHS[dimnum]*dimext*octheight, width, octheight, thickness, layers, linedepthl*0.15, root=ratio)
+            node.draw(window, x, y - INTERVALLENGTHS[dimnum]*dimext*octheight, width, octheight, thickness, layers, layers_right, linedepthl*0.15, 1-linedepthr*0.15, root=ratio, highlighted=highlighted, voicenum=voicenum)
 
     def get_pitches(self, freq):
         result = []
@@ -258,9 +339,9 @@ class Chord:
         self.duration = duration
         self.time = timeval
     
-    def draw(self, window, rooty, t0, barwidth, octheight):
-        layers = self.note.precompute_positions()
-        print(layers)
-        self.note.draw(window, t0 + barwidth*self.time, rooty, self.duration*barwidth, octheight, 1, layers)
+    def draw(self, window, rooty, t0, barwidth, octheight, highlighted=True, voicenum=0):
+        layers, layers_right = self.note.precompute_positions()
+        #print(layers)
+        self.note.draw(window, t0 + barwidth*self.time, rooty, self.duration*barwidth, octheight, 1, layers, layers_right, highlighted=highlighted, voicenum=voicenum)
 
             
