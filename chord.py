@@ -33,8 +33,6 @@ class Note:
         self.derivatives = derivatives if derivatives else []
         self.is_silent = is_silent
         self.set_ratio(ratio)
-        self.left_layer = 0
-        #self.right = 0
         self.parent = None
         
     def add_derivative(self, exponent, extent, is_silent=False):
@@ -141,10 +139,29 @@ class Note:
 
                 # check for collision
                 # if new node collides with bar:
+                notes[ratio] = derivative[2]
                 while True: 
                     for bar in bars:
                         if ratio in bar and layers[ratio] == bars[bar]:
                             layers[ratio] += 1
+                            
+                            current_parent = notes[ratio].parent
+                            previous_parent = notes[ratio]
+                            while True: # yes i do this a lot
+
+                                if not current_parent:
+                                    break
+                                if previous_parent.ratio / current_parent.ratio not in [Fraction(3, 2), Fraction(2, 3)]:
+                                    break
+                                if current_parent.ratio in layers.keys():
+                                    layers[current_parent.ratio] += 1
+                                parent_range = Range(min(current_parent.ratio, previous_parent.ratio), max(current_parent.ratio, previous_parent.ratio), include_start=False)
+                                if parent_range in bars.keys():
+                                    bars[parent_range] += 1
+                                previous_parent = current_parent
+                                current_parent = current_parent.parent
+                            #print(previous_parent.ratio)
+                            #layers[previous_parent.ratio] += 1
                             break
                     else:
                         break
@@ -155,7 +172,7 @@ class Note:
                     else:
                         break
                     #print("eoijds")
-                notes[ratio] = derivative[2]
+
 
                 
 
@@ -236,6 +253,16 @@ class Note:
             if node == derivative[2]:
                 removals = i
         del self.derivatives[removals]
+
+    def as_json(self):
+        obj = {}
+        obj["derivatives"] = []
+        obj["numberator"] = self.ratio.numerator
+        obj["denominator"] = self.ratio.denominator
+        obj["muted"] = self.is_silent
+        for derivative in self.derivatives:
+            obj["derivatives"].append({"dimension": derivative[0], "direction": derivative[1], "note": derivative[2].as_json()})
+        return obj
                 
 
         
@@ -332,6 +359,31 @@ class Note:
         for derivative in self.derivatives:
             result += derivative[2].get_pitches(freq*(RATIOS[derivative[0]]**derivative[1]))
         return result
+    
+    @classmethod
+    def from_json(cls, data):
+        # 1. Reconstruct the Ratio
+        # Note: Using "numberator" to match your save function's key
+        numerator = data["numberator"] 
+        denominator = data["denominator"]
+        is_silent = data["muted"]
+        ratio = Fraction(numerator, denominator)
+        
+        # 2. Create the Note instance
+        note_instance = cls(ratio=ratio, is_silent=is_silent)
+        
+        # 3. Recursively reconstruct derivatives
+        # data["derivatives"] is a list of dicts: 
+        # {"dimension": x, "direction": y, "note": nested_note_obj}
+        if "derivatives" in data:
+            for d in data["derivatives"]:
+                dimension = d["dimension"]
+                direction = d["direction"]
+                # Recursive call to load the nested note
+                nested_note = cls.from_json(d["note"])
+                note_instance.derivatives.append((dimension, direction, nested_note))
+                
+        return note_instance
 
 class Chord:
     def __init__(self, note: Note, duration: Fraction, timeval: Fraction):
@@ -342,6 +394,26 @@ class Chord:
     def draw(self, window, rooty, t0, barwidth, octheight, highlighted=True, voicenum=0):
         layers, layers_right = self.note.precompute_positions()
         #print(layers)
-        self.note.draw(window, t0 + barwidth*self.time, rooty, self.duration*barwidth, octheight, 1, layers, layers_right, highlighted=highlighted, voicenum=voicenum)
+        self.note.draw(window, t0 + barwidth*self.time, rooty, self.duration*barwidth, octheight, 1, layers, layers_right, highlighted=highlighted, voicenum=voicenum, current_left=layers[Fraction(1)]*0.15)
+
+    def as_json(self):
+        obj = {}
+        obj["note"] = self.note.as_json()
+        obj["duration"] = self.duration
+        obj["time"] = self.time
+
+        return obj
+    
+    @classmethod
+    def from_json(cls, data):
+        # 1. Reconstruct the Note object first
+        note_obj = Note.from_json(data["note"])
+        
+        # 2. Extract simple fields
+        duration = data["duration"]
+        time = data["time"]
+        
+        # 3. Return new Chord
+        return cls(note_obj, duration, time)
 
             

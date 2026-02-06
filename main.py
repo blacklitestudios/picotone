@@ -6,6 +6,7 @@ from fractions import Fraction
 from consts import *
 from button import Button
 import sys
+import json
 
 
 # init window
@@ -30,13 +31,14 @@ def get_shasavic(size):
     return pygame.font.Font("assets/fonts/icons.ttf", size)
 
 # synths
+WAVE = "triangle"
 synthesizer = synth.PolyphonicSynth()
-synthesizer.set_waveform("triangle")
+synthesizer.set_waveform(WAVE)
 synthesizer.set_adsr(0.01, 0.1, 0.8, 0.01)
 synthesizer.start()
 
 synthesizer2 = synth.PolyphonicSynth()
-synthesizer2.set_waveform("triangle")
+synthesizer2.set_waveform(WAVE)
 synthesizer2.set_adsr(0.01, 0.1, 0.8, 0.01)
 synthesizer2.start()
 
@@ -44,7 +46,7 @@ synthesizer2.start()
 
 
 prev_synth = synth.PolyphonicSynth()
-prev_synth.set_waveform("triangle")
+prev_synth.set_waveform(WAVE)
 prev_synth.set_adsr(0.01, 0.1, 0.8, 0.01)
 prev_synth.start()
 
@@ -55,7 +57,6 @@ clock = pygame.time.Clock()
 # graphics settings
 octave_height = 120
 bar_width = 100
-root = 440
 root_height = HEIGHT // 2
 t0_x = 0
 
@@ -301,6 +302,54 @@ def find_chord(time, voice):
         return None
     return chordarr[max_time]
 
+ROOT = 440
+
+def save_to_json():
+    obj = {}
+    obj["voice1"] = []
+    obj["voice2"] = []
+    obj["root"] = ROOT
+    for chord_time in voice1:
+        chord_obj = voice1[chord_time].as_json()
+        obj["voice1"].append(chord_obj)
+    for chord_time in voice2:
+        chord_obj = voice2[chord_time].as_json()
+        obj["voice2"].append(chord_obj)
+    
+    return obj
+
+# The Main Loading Function
+def load_from_json(json_data):
+    # If json_data is a string, parse it; if it's already a dict, use it directly
+    if isinstance(json_data, str):
+        obj = json.loads(json_data)
+    else:
+        obj = json_data
+
+    # Initialize the structure to match your original global variables
+    loaded_state = {
+        "root": obj.get("root"),
+        "voice1": {},
+        "voice2": {}
+    }
+
+    # Reconstruct Voice 1
+    # Your save function converted a Dict (time -> chord) to a List.
+    # We must convert that List back to a Dict keyed by time.
+    for chord_data in obj.get("voice1", []):
+        chord = Chord.from_json(chord_data)
+        loaded_state["voice1"][chord.time] = chord
+
+    # Reconstruct Voice 2
+    for chord_data in obj.get("voice2", []):
+        chord = Chord.from_json(chord_data)
+        loaded_state["voice2"][chord.time] = chord
+
+    return loaded_state
+
+
+
+
 
 
 while running:
@@ -359,12 +408,12 @@ while running:
 
                 if event.key == pygame.K_SPACE:
                     # preview chord
-                    pitches = test_chord_1.note.get_pitches(440*test_chord_1.note.ratio)
+                    pitches = test_chord_1.note.get_pitches(ROOT*test_chord_1.note.ratio)
                     for freq in pitches:
                         freq_float = float(freq)
                         result = synthesizer.note_on((freq))
 
-                    pitches = test_chord_2.note.get_pitches(440*test_chord_2.note.ratio)
+                    pitches = test_chord_2.note.get_pitches(ROOT*test_chord_2.note.ratio)
                     for freq in pitches:
                         freq_float = float(freq)
                         result = synthesizer.note_on((freq))
@@ -463,6 +512,8 @@ while running:
                     if event.key == pygame.K_LSHIFT:
                         # reverse direction
                         add_direction = -1
+                    
+                    
 
                     elif event.key == pygame.K_f:
                         if current_menu == "addchord":
@@ -500,12 +551,63 @@ while running:
                         add_chord_ratio = Fraction(1)
                         selected_length = 2
                     elif event.key == pygame.K_l:
-                        if current_menu == "addchord":
-                            current_menu = ""
+                        if not keys[pygame.K_LCTRL]:
+                            if current_menu == "addchord":
+                                current_menu = ""
+                            else:
+                                current_menu = "addchord"
+                            add_chord_ratio = Fraction(1)
+                            selected_length = 4
+                if event.key == pygame.K_RETURN:
+                    # determine new chord time based on last chord time in order
+
+                    print(current_menu)
+                    if current_menu:
+
+                        if len(chords_order) > 0:
+                            last_time = chords[chords_order[-1]].time + chords[chords_order[-1]].duration + break_length
+                            new_time = last_time
                         else:
-                            current_menu = "addchord"
-                        add_chord_ratio = Fraction(1)
-                        selected_length = 4
+                            new_time = 0
+
+                        new_chord = Chord(
+                            Note(ratio=add_chord_ratio),
+                            selected_length-break_length,
+                            new_time,
+                        )
+
+                        # insert after selected index or append
+                        insert_pos = selected_chord_index + 1
+                        if insert_pos >= len(chords_order):
+                            # append
+                            chords[new_time] = new_chord
+                            chords_order.append(new_time)
+                            chords_order.sort()
+                        else:
+                            # insert at position
+                            chords[new_time] = new_chord
+                            chords_order.insert(insert_pos, new_time)
+                            chords_order.sort()
+
+                        current_menu = ""
+
+                if event.key == pygame.K_s:
+                    if keys[pygame.K_LCTRL]:
+                        with open("save.json", "w") as f:
+                            json.dump(save_to_json(), f)
+
+                if event.key == pygame.K_l:
+                    if keys[pygame.K_LCTRL]:
+                        with open("save.json", "r") as f:
+                            data = json.load(f)
+
+                        restored_data = load_from_json(data)
+                        voice1 = restored_data["voice1"]
+                        voice1_order = list(voice1.keys())
+                        voice2 = restored_data["voice2"]
+                        voice2_order = list(voice2.keys())
+                        root = restored_data["root"]
+                    
 
             if event.type == pygame.KEYUP:
                 if event.key == pygame.K_LSHIFT:
@@ -606,7 +708,7 @@ while running:
                                     if True:
                                         closest = temp_closest
                                         closest_ratio = closest.ratio
-                                        prev_synth.note_on(440*closest_ratio)
+                                        prev_synth.note_on(ROOT*closest_ratio)
                                         current_time = test_chord.time
                                     break
 
@@ -681,7 +783,7 @@ while running:
         i = 0
 
         pygame.draw.line(window, (192, 192, 192), (max(t0_x, 0), root_height), (WIDTH, root_height))
-        freq_text: pygame.Surface = FONT.render(str(440*2**i) + "Hz", True, (192, 192, 192))
+        freq_text: pygame.Surface = FONT.render(str(ROOT*2**i) + "Hz", True, (192, 192, 192))
         freq_text_width = freq_text.get_width()
         freq_rect = freq_text.get_rect()
         if t0_x < 12+freq_text_width:
@@ -696,7 +798,7 @@ while running:
             current_y -= octave_height
             i += 1
             pygame.draw.line(window, (128, 128, 128), (max(t0_x, 0), current_y), (WIDTH, current_y))
-            freq_text: pygame.Surface = FONT.render(str(440*2**i) + "Hz", True, (BG))
+            freq_text: pygame.Surface = FONT.render(str(ROOT*2**i) + "Hz", True, (BG))
             freq_text_width = freq_text.get_width()
             freq_rect = freq_text.get_rect()
             if t0_x < 12+freq_text_width:
@@ -714,7 +816,7 @@ while running:
             i -= 1
             pygame.draw.line(window, (128, 128, 128), (max(t0_x, 0), current_y), (WIDTH, current_y))
             pygame.draw.line(window, (128, 128, 128), (max(t0_x, 0), current_y), (WIDTH, current_y))
-            freq_text: pygame.Surface = FONT.render(str(440*2**i) + "Hz", True, (BG))
+            freq_text: pygame.Surface = FONT.render(str(ROOT*2**i) + "Hz", True, (BG))
             freq_text_width = freq_text.get_width()
             freq_rect = freq_text.get_rect()
             if t0_x < 12+freq_text_width:
@@ -843,7 +945,7 @@ while running:
             window.blit(info_text, info_rect)
         else:
             if closest:
-                note_info_text = get_font(30).render(f"440Hz X {closest_ratio}", True, BG)
+                note_info_text = get_font(30).render(f"{ROOT}Hz X {closest_ratio}", True, BG)
                 note_info_rect = note_info_text.get_rect()
                 note_info_rect.topleft = (140, 10)
                 window.blit(note_info_text, note_info_rect)
@@ -903,28 +1005,28 @@ while running:
         #print(voice1_chord)
         if voice1_chord and current_time <= voice1_chord.duration + voice1_chord.time:
             for freq in synthesizer.active_notes:
-                if freq not in voice1_chord.note.get_pitches(voice1_chord.note.ratio * 440):
+                if freq not in voice1_chord.note.get_pitches(voice1_chord.note.ratio * ROOT):
                     synthesizer.note_off((freq))
-            for freq in voice1_chord.note.get_pitches(voice1_chord.note.ratio * 440):
+            for freq in voice1_chord.note.get_pitches(voice1_chord.note.ratio * ROOT):
                 if freq not in synthesizer.active_notes:
                     synthesizer.note_on((freq))
         else:
             for freq in synthesizer.active_notes:
-                #if freq not in voice1_chord.note.get_pitches(voice1_chord.note.ratio * 440):
+                #if freq not in voice1_chord.note.get_pitches(voice1_chord.note.ratio * ROOT):
                     synthesizer.note_off((freq))
 
         voice2_chord = find_chord(current_time, 2)
         #print(voice1_chord)
         if voice2_chord and current_time <= voice2_chord.duration + voice2_chord.time:
             for freq in synthesizer2.active_notes:
-                if freq not in voice2_chord.note.get_pitches(voice2_chord.note.ratio * 440) and freq not in voice1_chord.note.get_pitches(voice1_chord.note.ratio * 440):
+                if freq not in voice2_chord.note.get_pitches(voice2_chord.note.ratio * ROOT) and freq not in voice1_chord.note.get_pitches(voice1_chord.note.ratio * ROOT):
                     synthesizer2.note_off((freq))
-            for freq in voice2_chord.note.get_pitches(voice2_chord.note.ratio * 440):
+            for freq in voice2_chord.note.get_pitches(voice2_chord.note.ratio * ROOT):
                 if freq not in synthesizer2.active_notes:
                     synthesizer2.note_on((freq))
         else:
             for freq in synthesizer2.active_notes:
-                #if freq not in voice1_chord.note.get_pitches(voice1_chord.note.ratio * 440):
+                #if freq not in voice1_chord.note.get_pitches(voice1_chord.note.ratio * ROOT):
                     synthesizer2.note_off((freq))
         
         
