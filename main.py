@@ -11,7 +11,7 @@ import json
 
 # init window
 pygame.init()
-WIDTH = 1024
+WIDTH = 1280
 HEIGHT = 720
 window = pygame.display.set_mode((WIDTH, HEIGHT), pygame.SCALED | pygame.SRCALPHA, vsync=1)
 pygame.display.set_caption("PicoTone")
@@ -19,8 +19,7 @@ pygame.display.set_icon(pygame.image.load("assets/icon.bmp"))
 running = True
 
 # colors & fonts
-BG = (177, 176, 184)
-ACCENT = (92, 89, 107)
+
 FONT = pygame.font.Font("assets/fonts/lisa.ttf", 15)
 SHASAV = pygame.font.Font("assets/fonts/icons.ttf", 15)
 
@@ -90,71 +89,10 @@ def pf(num: int):
         thirteens += 1
     return (twos, threes, fives, sevens, elevens, thirteens)
 
-three_names = { 1: "chy", 2:"scy",    3:"xcy",  4: "cvachy",  5: "dachy",  6: "tuichy",  7: "sachy",  8: "chlachy",  9: "yuchy",  10: "xychy", 11: "nuichy", 12: "kychy", 
-               -1: "fu", -2: "schu", -3: "ju", -4: "cvafu",  -5: "dafu",  -6: "tuifu",  -7: "safu",  -8: "chlafu",  -9: "yufu",  -10: "xyfu", -11: "nuifu", -12: "kyfu"}
-five_names = {1: "ly", 2:"dry", 3:"drvy", 4: "cvaly", 5: "daly", 6:"tuily", 7: "saly", 8: "chlaly", 9: "yuly", 10: "xyly", 11: "nuily", 12: "kyly",
-              -1: "su", -2: "sru", -3: "srvu", -4: "cvasu", -5: "dasu", -6: "tuisu", -7: "sasu", -8: "chlasu", -9: "yusu", -10: "xysu", -11: "nuisu", -12: "kysu"}
-seven_names = {1: "my", 2:"mry", 3:"mrvy", 4: "cvamy", 5: "damy", 6:"tuimy", 7: "samy", 8: "chlamy", 9: "yumy", 10: "xymy", 11: "nuimy", 12: "kymy",
-              -1: "pu", -2: "pru", -3: "prvu", -4: "cvapu", -5: "dapu", -6: "tuipu", -7: "sapu", -8: "chlapu", -9: "yupu", -10: "xypu", -11: "nuipu", -12: "kypu"}
-eleven_names = {1: "zy", 2:"zry", 3:"zrvy", 4: "cvazy", 5: "dazy", 6:"tuizy", 7: "sazy", 8: "chlazy", 9: "yuzy", 10: "xyzy", 11: "nuizy", 12: "kyzy",
-              -1: "ku", -2: "kru", -3: "krvu", -4: "cvaku", -5: "daku", -6: "tuiku", -7: "saku", -8: "chlaku", -9: "yuku", -10: "xyku", -11: "nuiku", -12: "kyku"}
-thirteen_names = {1: "gnay", 2:"gray", 3:"grvay", 4: "cvagnay", 5: "dagnay", 6:"tuignay", 7: "sagnay", 8: "chlagnay", 9: "yugnay", 10: "xygnay", 11: "nuignay", 12: "kygnay",
-              -1: "gnau", -2: "grau", -3: "grvau", -4: "cvagnau", -5: "dagnau", -6: "tuignau", -7: "sagnau", -8: "chlagnau", -9: "yugnau", -10: "xygnau", -11: "nuignau", -12: "kygnau"}
 
-names = [None, three_names, five_names, seven_names, eleven_names, thirteen_names]
 
-def name_ratio(ratio: Fraction):
-    try:
-        numerator = pf(ratio.numerator)
-        denominator = pf(ratio.denominator)
-        combined_factors = [0, 0, 0, 0, 0, 0]
-        for i in range(6):
-            combined_factors[i] = combined_factors[i] + numerator[i] - denominator[i]
-        num_primes = 0
-        name = ""
-        for i in range(1, 6):
-            if combined_factors[i] != 0:
-                num_primes += 1
-                name += names[i][combined_factors[i]]
-        
-        if num_primes > 1:
-            if name[-1] == "u":
-                name = name[:-1]
-            if name[-1] == "y":
-                name = name[:-1] + "i"
-        if num_primes == 0:
-            name = "ah"
-        
-        name = name.title()
-        return name.strip()
-    except Exception:
-        return "???"
-    
-def visualise_ratio(ratio: Fraction):
-        numerator = pf(ratio.numerator)
-        denominator = pf(ratio.denominator)
-        combined_factors = [0, 0, 0, 0, 0,  0]
-        for i in range(6):
-            combined_factors[i] = combined_factors[i] + numerator[i] - denominator[i]
-        num_primes = 0
-        name = ""
-        dimensions = ['e', 'f', 'g', 'h', 'i', 'j', 'k']
-        up = 'l'
-        down = 'm'
-        for i in range(0, 6):
-            if combined_factors[i] != 0:
-                name += dimensions[i+1]
-                if combined_factors[i] > 0:
-                    name += up*combined_factors[i]
-                else:
-                    name += down*(-combined_factors[i])
-                num_primes += 1
 
-        if num_primes == 0:
-            name = 'e'
-        
-        #name = name.title()
-        return name.strip()
+
     
 
 
@@ -277,30 +215,78 @@ current_time = 0
 barspersecond = 1/3
 paused = True
 
+# Playback indices for optimized chord lookup
+voice1_playback_idx = 0
+voice2_playback_idx = 0
+
 break_length = 3/128
 selected_length = Fraction(0)
 
 
 def find_chord(time, voice):
+    """Optimized chord lookup using playback index - O(1) instead of O(n)"""
+    global voice1_playback_idx, voice2_playback_idx
     
     if voice == 1:
         chordarr = voice1
         chordorder = voice1_order
+        playback_idx = voice1_playback_idx
     elif voice == 2:
         chordarr = voice2
         chordorder = voice2_order
-    
-    if len(chordarr) == 0:
+        playback_idx = voice2_playback_idx
+    else:
         return None
+    
+    if len(chordorder) == 0:
+        return None
+    
+    # Clamp index to valid range
+    playback_idx = max(0, min(playback_idx, len(chordorder) - 1))
+    
+    # Get current chord
+    chord_time = chordorder[playback_idx]
+    chord = chordarr[chord_time]
+    
+    # Check if we need to advance to next chord
+    while playback_idx < len(chordorder) - 1:
+        next_chord_time = chordorder[playback_idx + 1]
+        next_chord = chordarr[next_chord_time]
+        
+        # If time has passed the current chord's end, move to next
+        if time >= chord.time + chord.duration and time >= next_chord.time:
+            playback_idx += 1
+            chord_time = next_chord_time
+            chord = next_chord
+        else:
+            break
+    
+    # Check if we need to go back to previous chord (e.g., user seeked backwards)
+    while playback_idx > 0:
+        if time < chord.time:
+            playback_idx -= 1
+            chord_time = chordorder[playback_idx]
+            chord = chordarr[chord_time]
+        else:
+            break
+    
+    # Update global playback index
+    if voice == 1:
+        voice1_playback_idx = playback_idx
+    elif voice == 2:
+        voice2_playback_idx = playback_idx
+    
+    # Check if time is within the chord's duration
+    if time < chord.time or time > chord.time + chord.duration:
+        return None
+    
+    return chord
 
-    times = []
-    for chord in chordarr.values():
-        times.append(chord.time)
-    
-    max_time = max(filter(lambda x: x < time, times), default=0)
-    if max_time > max_time + chordarr[max_time].duration or max_time < chordarr[max_time].time:
-        return None
-    return chordarr[max_time]
+def reset_playback_indices():
+    """Reset playback indices when seeking or restarting playback"""
+    global voice1_playback_idx, voice2_playback_idx
+    voice1_playback_idx = 0
+    voice2_playback_idx = 0
 
 ROOT = 440
 
@@ -363,7 +349,8 @@ while running:
     bg_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
     bg_surface.get_rect().topleft = (0, 0)
     bg_surface.fill(BG)
-    pygame.draw.rect(bg_surface, (0, 0, 0, 0), pygame.Rect(10, 100, WIDTH-20, HEIGHT-200), border_bottom_left_radius=10, border_bottom_right_radius=10, border_top_right_radius=10)
+    pygame.draw.rect(bg_surface, (0, 0, 0, 0), pygame.Rect(10, 100, WIDTH-220, HEIGHT-200), border_bottom_left_radius=10, border_bottom_right_radius=10, border_top_right_radius=10)
+    pygame.draw.rect(bg_surface, (0, 0, 0, 0), pygame.Rect(WIDTH-200, 100, 180, 100), border_radius=10)
     title_text = get_font(30).render("PICOTONE", True, ACCENT)
     title_text2 = FONT.render("SHASAVIC", True, ACCENT)
     title_rect = title_text.get_rect()
@@ -421,16 +408,6 @@ while running:
                 if event.key == pygame.K_ESCAPE:
                     # stop selection
                     closest = None
-                if event.key == pygame.K_TAB:
-                    # deprecated
-                    '''if current_menu == "addchord":
-                        current_menu = ""
-                    else:
-                        current_menu = "addchord"
-                    if closest:
-                        add_chord_ratio = closest.ratio
-                    else:
-                        add_chord_ratio = Fraction(1)'''
                 
                 if not current_menu:
                     # no menu currently
@@ -561,7 +538,6 @@ while running:
                 if event.key == pygame.K_RETURN:
                     # determine new chord time based on last chord time in order
 
-                    print(current_menu)
                     if current_menu:
 
                         if len(chords_order) > 0:
@@ -694,7 +670,7 @@ while running:
                         time = (mouse_x - t0_x) / bar_width
                         if True:
                             for chord in chords.values():
-                                print(time, chord.duration + chord.time ,chord.time)
+                                #print(time, chord.duration + chord.time ,chord.time)
                                 if time < chord.duration + chord.time and time > chord.time:
                                     #t = chords_order[time]
                                     test_chord = chord
@@ -710,6 +686,7 @@ while running:
                                         closest_ratio = closest.ratio
                                         prev_synth.note_on(ROOT*closest_ratio)
                                         current_time = test_chord.time
+                                        reset_playback_indices()  # Reset indices when seeking
                                     break
 
                     else:
@@ -720,7 +697,7 @@ while running:
                     for i, button in enumerate(create_chord_buttons_plus):
                         if button.get_rect().collidepoint((mouse_x, mouse_y)):
                             add_chord_ratio *= RATIOS[i+1]
-                            print(add_chord_ratio)
+                            #print(add_chord_ratio)
                     for i, button in enumerate(create_chord_buttons_minus):
                         if button.get_rect().collidepoint((mouse_x, mouse_y)):
                             add_chord_ratio /= RATIOS[i+1]
@@ -830,12 +807,23 @@ while running:
             pygame.draw.line(window, (128, 128, 128), (t0_x+current_time*bar_width, 0), (t0_x+current_time*bar_width, HEIGHT))
 
 
-        # draw voices in time order
+        # draw voices in time order (only draw chords visible on screen for performance)
+        # Calculate which chords are visible based on viewport
+        min_visible_time = -t0_x / bar_width if bar_width > 0 else 0
+        max_visible_time = (WIDTH - t0_x) / bar_width if bar_width > 0 else 0
+        
         for t in voice1_order:
             chord = voice1[t]
+            # Skip chords that are outside the viewport
+            if chord.time + chord.duration < min_visible_time or chord.time > max_visible_time:
+                continue
             chord.draw(window, root_height-math.log(chord.note.ratio, 2)*octave_height, t0_x, bar_width, octave_height, highlighted=(chord == test_chord), voicenum=0)
+        
         for t in voice2_order:
             chord = voice2[t]
+            # Skip chords that are outside the viewport
+            if chord.time + chord.duration < min_visible_time or chord.time > max_visible_time:
+                continue
             chord.draw(window, root_height-math.log(chord.note.ratio, 2)*octave_height, t0_x, bar_width, octave_height, highlighted=(chord == test_chord), voicenum=1)
         if closest:
             drawn_ylevel = root_height - math.log(closest_ratio, 2)*octave_height
@@ -1002,36 +990,43 @@ while running:
     if not paused:
         current_time += clock.get_time() / 1000
         voice1_chord = find_chord(current_time, 1)
-        #print(voice1_chord)
-        if voice1_chord and current_time <= voice1_chord.duration + voice1_chord.time:
-            for freq in synthesizer.active_notes:
-                if freq not in voice1_chord.note.get_pitches(voice1_chord.note.ratio * ROOT):
-                    synthesizer.note_off((freq))
-            for freq in voice1_chord.note.get_pitches(voice1_chord.note.ratio * ROOT):
-                if freq not in synthesizer.active_notes:
-                    synthesizer.note_on((freq))
-        else:
-            for freq in synthesizer.active_notes:
-                #if freq not in voice1_chord.note.get_pitches(voice1_chord.note.ratio * ROOT):
-                    synthesizer.note_off((freq))
-
         voice2_chord = find_chord(current_time, 2)
-        #print(voice1_chord)
-        if voice2_chord and current_time <= voice2_chord.duration + voice2_chord.time:
-            for freq in synthesizer2.active_notes:
-                if freq not in voice2_chord.note.get_pitches(voice2_chord.note.ratio * ROOT) and freq not in voice1_chord.note.get_pitches(voice1_chord.note.ratio * ROOT):
-                    synthesizer2.note_off((freq))
-            for freq in voice2_chord.note.get_pitches(voice2_chord.note.ratio * ROOT):
-                if freq not in synthesizer2.active_notes:
-                    synthesizer2.note_on((freq))
+        
+        # cache pitches
+        voice1_pitches = voice1_chord.note.get_pitches(voice1_chord.note.ratio * ROOT) if voice1_chord else set()
+        voice2_pitches = voice2_chord.note.get_pitches(voice2_chord.note.ratio * ROOT) if voice2_chord else set()
+        
+        # Update voice 1
+        if voice1_chord and current_time <= voice1_chord.duration + voice1_chord.time:
+            # turn off notes that shouldn't be playing
+            for freq in list(synthesizer.active_notes.keys()):
+                if freq not in voice1_pitches:
+                    synthesizer.note_off(freq)
+            # turn on notes that should be playing
+            for freq in voice1_pitches:
+                if freq not in synthesizer.active_notes:
+                    synthesizer.note_on(freq)
         else:
-            for freq in synthesizer2.active_notes:
-                #if freq not in voice1_chord.note.get_pitches(voice1_chord.note.ratio * ROOT):
-                    synthesizer2.note_off((freq))
-        
-        
+            # turn everything off, nothing playing
+            for freq in list(synthesizer.active_notes.keys()):
+                synthesizer.note_off(freq)
 
+        # Update voice 2
+        if voice2_chord and current_time <= voice2_chord.duration + voice2_chord.time:
+            # turn off notes that shouldn't be playing (excluding voice1 notes)
+            for freq in list(synthesizer2.active_notes.keys()):
+                if freq not in voice2_pitches and freq not in voice1_pitches:
+                    synthesizer2.note_off(freq)
+            # turn on notes that should be playing
+            for freq in voice2_pitches:
+                if freq not in synthesizer2.active_notes:
+                    synthesizer2.note_on(freq)
+        else:
+            # turn everything off
+            for freq in list(synthesizer2.active_notes.keys()):
+                synthesizer2.note_off(freq)
 
+    print(voice1_playback_idx)
     #if closest: print(closest.parent)
 
 synthesizer.stop()

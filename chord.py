@@ -165,13 +165,32 @@ class Note:
                             break
                     else:
                         break
+                while True:
                     for bar in bars_right:
                         if ratio in bar and layers_right[ratio] == bars_right[bar]:
                             layers_right[ratio] += 1
+
+                            current_parent = notes[ratio].parent
+                            previous_parent = notes[ratio]
+                            while True: # yes i do this a lot
+                                print("prie")
+                                if not current_parent:
+                                    break
+                                if previous_parent.ratio / current_parent.ratio not in [Fraction(5, 4), Fraction(4, 5)]:
+                                    break
+                                if current_parent.ratio in layers_right.keys():
+                                    layers_right[current_parent.ratio] += 1
+                                parent_range = Range(min(current_parent.ratio, previous_parent.ratio), max(current_parent.ratio, previous_parent.ratio), include_start=False)
+                                if parent_range in bars_right.keys():
+                                    bars_right[parent_range] += 1
+                                previous_parent = current_parent
+                                current_parent = current_parent.parent
+                            #print(previous_parent.ratio)
+                            #layers[previous_parent.ratio] += 1
                             break
                     else:
                         break
-                    #print("eoijds")
+                        #print("eoijds")
 
 
                 
@@ -384,6 +403,10 @@ class Note:
                 note_instance.derivatives.append((dimension, direction, nested_note))
                 
         return note_instance
+    
+def get_shasavic(size):
+    return pygame.font.Font("assets/fonts/icons.ttf", size)
+
 
 class Chord:
     def __init__(self, note: Note, duration: Fraction, timeval: Fraction):
@@ -394,14 +417,18 @@ class Chord:
     def draw(self, window, rooty, t0, barwidth, octheight, highlighted=True, voicenum=0):
         layers, layers_right = self.note.precompute_positions()
         #print(layers)
-        self.note.draw(window, t0 + barwidth*self.time, rooty, self.duration*barwidth, octheight, 1, layers, layers_right, highlighted=highlighted, voicenum=voicenum, current_left=layers[Fraction(1)]*0.15)
+        self.note.draw(window, t0 + barwidth*self.time, rooty, self.duration*barwidth, octheight, 1, layers, layers_right, highlighted=highlighted, voicenum=voicenum, current_left=layers[Fraction(1)]*0.15, current_right = 1-layers_right[Fraction(1)]*0.15)
+        root_text = get_shasavic(15).render(visualise_ratio(self.note.ratio, ignore_twos=True), True, (255, 255, 255), ACCENT)
+        root_rect = root_text.get_rect()
+        root_rect.center = (t0+barwidth*self.time+self.duration*barwidth/2, rooty)
+        #window.blit(root_text, root_rect)
 
     def as_json(self):
         obj = {}
         obj["note"] = self.note.as_json()
         obj["duration"] = self.duration
         obj["time"] = self.time
-
+ 
         return obj
     
     @classmethod
