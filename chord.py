@@ -34,6 +34,8 @@ class Note:
         self.is_silent = is_silent
         self.set_ratio(ratio)
         self.parent = None
+    def set_parent_chord(self, chord):
+        self.parent_chord = chord
         
     def add_derivative(self, exponent, extent, is_silent=False):
         new_ratio = self.ratio*RATIOS[exponent]**extent
@@ -41,7 +43,10 @@ class Note:
             return
         note = Note([], is_silent, new_ratio)
         note.parent = self
+        note.set_parent_chord(self.parent_chord)
         self.derivatives.append((exponent, extent, note))
+        self.parent_chord.reset_layers()
+        self.parent_chord.recalc_freqs()
 
 
     def set_ratio(self, ratio):
@@ -173,7 +178,7 @@ class Note:
                             current_parent = notes[ratio].parent
                             previous_parent = notes[ratio]
                             while True: # yes i do this a lot
-                                print("prie")
+                                #print("prie")
                                 if not current_parent:
                                     break
                                 if previous_parent.ratio / current_parent.ratio not in [Fraction(5, 4), Fraction(4, 5)]:
@@ -272,6 +277,8 @@ class Note:
             if node == derivative[2]:
                 removals = i
         del self.derivatives[removals]
+        self.parent_chord.reset_layers()
+        self.parent_chord.recalc_freqs()
 
     def as_json(self):
         obj = {}
@@ -413,11 +420,31 @@ class Chord:
         self.note = note
         self.duration = duration
         self.time = timeval
+        self.layers_cache, self.layers_right_cache = self.note.precompute_positions()
+        self.freqs_cache = self.note.get_pitches(1)
+        self.note.set_parent_chord(self)
+        self.cached_pitches = None
+        self.cached_surf = pygame.Surface((1280, 720))
+
+    def get_freqs(self, freq):
+        return [i*freq for i in self.freqs_cache]
+
+    def reset_layers(self):
+        self.layers_cache, self.layers_right_cache = self.note.precompute_positions()
+    
+    def recalc_freqs(self):
+        self.freqs_cache = self.note.get_pitches(1)
+    
+    def recalc_surface(self):
+        self.draw(self.cached_surf, root_height, t0_x, bar_width, octave_height, chords[selected_chord_index] is self, 0 if chords is voice1 else 1)
+    
+    def actual_draw(self, window):
+        window.blit(self.cached_surf, (0, 0))
     
     def draw(self, window, rooty, t0, barwidth, octheight, highlighted=True, voicenum=0):
-        layers, layers_right = self.note.precompute_positions()
+        #layers, layers_right = 
         #print(layers)
-        self.note.draw(window, t0 + barwidth*self.time, rooty, self.duration*barwidth, octheight, 1, layers, layers_right, highlighted=highlighted, voicenum=voicenum, current_left=layers[Fraction(1)]*0.15, current_right = 1-layers_right[Fraction(1)]*0.15)
+        self.note.draw(window, t0 + barwidth*self.time, rooty, self.duration*barwidth, octheight, 1, self.layers_cache, self.layers_right_cache, highlighted=highlighted, voicenum=voicenum, current_left=self.layers_cache[Fraction(1)]*0.15, current_right = 1-self.layers_right_cache[Fraction(1)]*0.15)
         root_text = get_shasavic(15).render(visualise_ratio(self.note.ratio, ignore_twos=True), True, (255, 255, 255), ACCENT)
         root_rect = root_text.get_rect()
         root_rect.center = (t0+barwidth*self.time+self.duration*barwidth/2, rooty)

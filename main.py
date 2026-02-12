@@ -5,14 +5,37 @@ import math
 from fractions import Fraction
 from consts import *
 from button import Button
+from ranges import Range
 import sys
 import json
+
+import bisect  # At top of file
+
+# Helper function
+def find_visible_chords(chord_times, min_time, max_time, chords_dict):
+    """Use binary search to find only chords visible in viewport."""
+    if not chord_times:
+        return []
+    
+    start_idx = max(0, bisect.bisect_left(chord_times, min_time) - 1)
+    end_idx = min(len(chord_times), bisect.bisect_right(chord_times, max_time))
+    
+    visible = []
+    for i in range(start_idx, end_idx):
+        t = chord_times[i]
+        if t not in chords_dict:
+            continue
+
+        chord = chords_dict[t]
+        if chord.time + chord.duration >= min_time and chord.time <= max_time:
+            visible.append(t)
+    
+    return visible
 
 
 # init window
 pygame.init()
-WIDTH = 1280
-HEIGHT = 720
+
 window = pygame.display.set_mode((WIDTH, HEIGHT), pygame.SCALED | pygame.SRCALPHA, vsync=1)
 pygame.display.set_caption("PicoTone")
 pygame.display.set_icon(pygame.image.load("assets/icon.bmp"))
@@ -53,11 +76,7 @@ prev_synth.start()
 timer = 0
 clock = pygame.time.Clock()
 
-# graphics settings
-octave_height = 120
-bar_width = 100
-root_height = HEIGHT // 2
-t0_x = 0
+
 
 
 # factorizations
@@ -108,19 +127,7 @@ test_chord_2 = Chord(
     0
 )
 
-closest = None
-# voices: map time -> Chord, plus ordered list of times for indexing/navigation
-voice1 = {}
-voice2 = {}
-voice1_order = []
-voice2_order = []
-# chords points to the current voice dict and chords_order to its ordered timestamps
-chords = voice1
-chords_order = voice1_order
-selected_chord_index = 0
 
-voice1_current_chord = 0
-voice2_current_chord = 0
 
 # buttons
 mute_button_surface = pygame.Surface((50, 50), pygame.SRCALPHA)
@@ -219,8 +226,12 @@ paused = True
 voice1_playback_idx = 0
 voice2_playback_idx = 0
 
-break_length = 3/128
+break_length = 1/32
 selected_length = Fraction(0)
+
+keychanges = {0: 1}
+keys_order = [0]
+key_playback_idx = 0
 
 
 def find_chord(time, voice):
@@ -282,6 +293,53 @@ def find_chord(time, voice):
     
     return chord
 
+def find_key(time):
+    """Optimized chord lookup using playback index - O(1) instead of O(n)"""
+    global key_playback_idx
+    
+    
+    chordarr = keychanges
+    chordorder = keys_order
+    playback_idx = key_playback_idx
+
+    
+    if len(chordorder) == 0:
+        return None
+    
+    # Clamp index to valid range
+    playback_idx = max(0, min(playback_idx, len(chordorder) - 1))
+    
+    # Get current chord
+    chord_time = chordorder[playback_idx]
+    chord = chordarr[chord_time]
+    
+    # Check if we need to advance to next chord
+    while playback_idx < len(chordorder) - 1:
+        next_chord_time = chordorder[playback_idx + 1]
+        next_chord = chordarr[next_chord_time]
+        
+        # If time has passed the current chord's end, move to next
+        if time >= next_chord:
+            playback_idx += 1
+            chord_time = next_chord_time
+            chord = next_chord
+        else:
+            break
+    
+    # Check if we need to go back to previous chord (e.g., user seeked backwards)
+    while playback_idx > 0:
+        if time < chordorder[playback_idx]:
+            playback_idx -= 1
+            chord_time = chordorder[playback_idx]
+            chord = chordarr[chord_time]
+        else:
+            break
+    
+    # Update global playback index
+    key_playback_idx = playback_idx
+    
+    return chord
+
 def reset_playback_indices():
     """Reset playback indices when seeking or restarting playback"""
     global voice1_playback_idx, voice2_playback_idx
@@ -336,7 +394,11 @@ def load_from_json(json_data):
 
 
 
-
+resizing_chord = None
+resize_start_duration = None
+repositioning_chord = None
+repos_start_time = None
+repos_offset = None
 
 while running:
     # event loop
@@ -349,8 +411,14 @@ while running:
     bg_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
     bg_surface.get_rect().topleft = (0, 0)
     bg_surface.fill(BG)
-    pygame.draw.rect(bg_surface, (0, 0, 0, 0), pygame.Rect(10, 100, WIDTH-220, HEIGHT-200), border_bottom_left_radius=10, border_bottom_right_radius=10, border_top_right_radius=10)
-    pygame.draw.rect(bg_surface, (0, 0, 0, 0), pygame.Rect(WIDTH-200, 100, 180, 100), border_radius=10)
+    pygame.draw.rect(bg_surface, (0, 0, 0, 0), pygame.Rect(10, 100, WIDTH-220, HEIGHT-250), border_bottom_left_radius=10, border_bottom_right_radius=10, border_top_right_radius=10)
+    pygame.draw.rect(bg_surface, ACCENT, pygame.Rect(WIDTH-200, 100, 180, 100), border_radius=10)
+    pygame.draw.rect(bg_surface, ACCENT, pygame.Rect(10, HEIGHT-140, WIDTH-220, 50), border_radius=10)
+    other_layer = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    other_layer.fill(BG)
+    pygame.draw.rect(other_layer, (0, 0, 0, 0), pygame.Rect(10, 100, WIDTH-220, HEIGHT-250), border_bottom_left_radius=10, border_bottom_right_radius=10, border_top_right_radius=10)
+    pygame.draw.rect(other_layer, ACCENT, pygame.Rect(WIDTH-200, 100, 180, 100), border_radius=10)
+    pygame.draw.rect(other_layer, (0, 0, 0, 0), pygame.Rect(10, HEIGHT-140, WIDTH-220, 50), border_radius=10)
     title_text = get_font(30).render("PICOTONE", True, ACCENT)
     title_text2 = FONT.render("SHASAVIC", True, ACCENT)
     title_rect = title_text.get_rect()
@@ -358,9 +426,12 @@ while running:
     title_rect2 = title_text2.get_rect()
     title_rect2.topleft = (20, 28)
 
+
+
     if current_page == "chordograph": # default visualisation mode
         # resolve test chords
         if 0 <= selected_chord_index < len(voice1_order):
+            print(voice1, voice1_order)
             test_chord_1 = voice1[voice1_order[selected_chord_index]]
         else:
             test_chord_1 = Chord(Note(ratio=Fraction(0)), duration=0, timeval=0)
@@ -376,6 +447,23 @@ while running:
             test_chord = None
         
         closest: Note
+
+        cursor_type = pygame.SYSTEM_CURSOR_ARROW
+        is_near_edge = False
+
+        if pygame.Rect(10, HEIGHT-140, WIDTH-220, 50).collidepoint(mouse_x, mouse_y):
+            mouse_time = (mouse_x - t0_x) / bar_width
+            for chord in chords.values():
+                chord_start = t0_x + bar_width * chord.time
+                chord_end = t0_x + bar_width * (chord.time + chord.duration)
+                if abs(mouse_x - chord_end) < RESIZE_EDGE_THRESHOLD:
+                    if mouse_y > 100 and mouse_y < HEIGHT - 50:  # within the drawing area
+                        cursor_type = pygame.SYSTEM_CURSOR_SIZEWE  # horizontal resize cursor
+                        is_near_edge = True
+                        break
+        pygame.mouse.set_cursor(cursor_type)
+
+
         for event in events:
             if event.type == pygame.QUIT:
                 # quit the game
@@ -395,12 +483,12 @@ while running:
 
                 if event.key == pygame.K_SPACE:
                     # preview chord
-                    pitches = test_chord_1.note.get_pitches(ROOT*test_chord_1.note.ratio)
+                    pitches = test_chord_1.get_freqs(keychanges[find_key(test_chord_1.time)]*test_chord_1.note.ratio)
                     for freq in pitches:
                         freq_float = float(freq)
                         result = synthesizer.note_on((freq))
 
-                    pitches = test_chord_2.note.get_pitches(ROOT*test_chord_2.note.ratio)
+                    pitches = test_chord_2.get_freqs(ROOT*test_chord_2.note.ratio)
                     for freq in pitches:
                         freq_float = float(freq)
                         result = synthesizer.note_on((freq))
@@ -535,10 +623,17 @@ while running:
                                 current_menu = "addchord"
                             add_chord_ratio = Fraction(1)
                             selected_length = 4
+                    elif event.key == pygame.K_SEMICOLON:
+                        if not keys[pygame.K_LCTRL]:
+                            if current_menu == "addkeysig":
+                                current_menu = ""
+                            else:
+                                current_menu = "addkeysig"
+                            add_chord_ratio = Fraction(1)
                 if event.key == pygame.K_RETURN:
                     # determine new chord time based on last chord time in order
 
-                    if current_menu:
+                    if current_menu == "addchord":
 
                         if len(chords_order) > 0:
                             last_time = chords[chords_order[-1]].time + chords[chords_order[-1]].duration + break_length
@@ -666,7 +761,27 @@ while running:
                         selected_length = 0.125
                     
                     # select notes
-                    elif pygame.Rect(10, 100, WIDTH-20, HEIGHT-150).collidepoint((mouse_x, mouse_y)) and test_chord:
+                    elif pygame.Rect(10, HEIGHT-140, WIDTH-220, 50).collidepoint(mouse_x, mouse_y):
+                        print("tm")
+                        for chord in list(voice1.values()) + list(voice2.values()):
+                            chord_end_x = t0_x + bar_width * (chord.time + chord.duration)
+                            if abs(mouse_x - chord_end_x) < RESIZE_EDGE_THRESHOLD:
+                                resizing_chord = chord
+                                resize_start_duration = chord.duration
+                                break
+                        else:
+                            for chord in list(voice1.values()) + list(voice2.values()):
+                                chord_start_x = t0_x + bar_width * (chord.time)
+                                chord_end_x = t0_x + bar_width * (chord.time + chord.duration)
+                                if chord_start_x < mouse_x and mouse_x < chord_end_x:
+                                    old_time_idx = chords_order.index(chord.time)
+                                    print("dofijf", chords_order, old_time_idx)
+                                    repositioning_chord = chord
+                                    repos_start_time = chord.time
+                                    repos_offset = mouse_x - chord_start_x
+                                    break
+                    
+                    if pygame.Rect(10, 100, WIDTH-20, HEIGHT-150).collidepoint((mouse_x, mouse_y)) and test_chord:
                         time = (mouse_x - t0_x) / bar_width
                         if True:
                             for chord in chords.values():
@@ -689,6 +804,10 @@ while running:
                                         reset_playback_indices()  # Reset indices when seeking
                                     break
 
+                    
+
+                    
+
                     else:
                         closest = None
 
@@ -709,8 +828,9 @@ while running:
                         else:
                             new_time = 0
 
+                        keysig = find_key(new_time)
                         new_chord = Chord(
-                            Note(ratio=add_chord_ratio),
+                            Note(ratio=add_chord_ratio*keysig),
                             selected_length-break_length,
                             new_time,
                         )
@@ -731,10 +851,129 @@ while running:
                         current_menu = ""
                     if create_chord_reset.get_rect().collidepoint((mouse_x, mouse_y)):
                         add_chord_ratio = Fraction(1)
+                elif current_menu == "addkeysig":
+                    for i, button in enumerate(create_chord_buttons_plus):
+                        if button.get_rect().collidepoint((mouse_x, mouse_y)):
+                            add_chord_ratio *= RATIOS[i+1]
+                            #print(add_chord_ratio)
+                    for i, button in enumerate(create_chord_buttons_minus):
+                        if button.get_rect().collidepoint((mouse_x, mouse_y)):
+                            add_chord_ratio /= RATIOS[i+1]
+                    if create_chord_confirm.get_rect().collidepoint((mouse_x, mouse_y)):
+                        # determine new chord time based on last chord time in order
+                        if len(chords_order) > 0:
+                            last_time = chords[chords_order[-1]].time + chords[chords_order[-1]].duration + break_length
+                            new_time = last_time
+                        else:
+                            new_time = 0
+
+                        keysig = find_key(new_time)
+                    
+
+                        # insert after selected index or append
+                        insert_pos = key_playback_idx + 1
+                        if insert_pos >= len(chords_order):
+                            # append
+                            keychanges[new_time] = add_chord_ratio
+                            keys_order.append(new_time)
+                            keys_order.sort()
+                        else:
+                            # insert at position
+                            keychanges[new_time] = add_chord_ratio
+                            keys_order.insert(insert_pos, new_time)
+                            keys_order.sort()
+
+                        current_menu = ""
+                    if create_chord_reset.get_rect().collidepoint((mouse_x, mouse_y)):
+                        add_chord_ratio = Fraction(1)
+            
+            if event.type == pygame.MOUSEMOTION:
+                if resizing_chord:
+                    # Calculate new duration based on mouse position
+                    new_duration = max(0.125, 0.03125*(round(32*((mouse_x - t0_x) / bar_width - resizing_chord.time))))
+                    resizing_chord.duration = new_duration
+                if repositioning_chord:
+                    # Calculate new duration based on mouse position
+                    
+                    #print(0.03125*(round(32*(((mouse_x - t0_x)/bar_width) -repos_offset))))
+                    new_position = max(0, 0.03125*(round(32*(((mouse_x - t0_x -repos_offset)/bar_width) ))))
+                    repositioning_chord.time = new_position
+                    
                         
             if event.type == pygame.MOUSEBUTTONUP:
                 for freq in list(prev_synth.active_notes.keys()):
                     prev_synth.note_off(freq)
+                
+                if resizing_chord:
+                    chords_order.sort()
+                    chords_snap = chords.copy()
+                    for i, chord in zip(chords_snap.keys(), chords_snap.values()):
+                        if chord is not resizing_chord:
+                            overlap = Range(chord.time, chord.time + chord.duration).union(
+                                Range(resizing_chord.time, resizing_chord.time + resizing_chord.duration)
+                            ) == Range(resizing_chord.time, resizing_chord.time + resizing_chord.duration)
+                            if overlap:
+                                # Remove from dict
+                                if chord.time in chords:
+                                    del chords[chord.time]
+                                # Remove from order list - FIX FOR KEYERROR
+                                if chord.time in chords_order:
+                                    chords_order.remove(chord.time)
+                    chords_order.clear() 
+                    for i in list(chords.keys()): chords_order.append(i)
+                    chords_order.sort()
+                    test_chord = chords[chords_order[0]]
+                    selected_chord_index = 0
+
+                resizing_chord = None
+                resize_start_duration = None
+                
+                if repositioning_chord:
+                    old_time = chords_order[old_time_idx]
+                    new_position = repositioning_chord.time
+                    del chords[old_time]
+                    chords_order.remove(old_time)
+                    chords_order.append(new_position)
+                    chords_order.sort()
+                    if chords.get(new_position) is not None:
+                        del chords[new_position]
+                        #del chords_order[old_time_idx]
+                        
+                    
+                    
+                    chords[new_position] = repositioning_chord
+                    print(old_time_idx)
+                    print(chords_order)
+                    
+                    chords_order.sort()
+                    chords_snap = chords.copy()
+                    for i, chord in zip(chords_snap.keys(), chords_snap.values()):
+                        if chord is not repositioning_chord:
+                            overlap = Range(chord.time, chord.time + chord.duration).union(
+                                Range(repositioning_chord.time, repositioning_chord.time + repositioning_chord.duration)
+                            ) == Range(repositioning_chord.time, repositioning_chord.time + repositioning_chord.duration)
+                            if overlap:
+                                # Remove from dict
+                                if chord.time in chords:
+                                    del chords[chord.time]
+                                # Remove from order list - FIX FOR KEYERROR
+                                if chord.time in chords_order:
+                                    chords_order.remove(chord.time)
+                    chords_order.clear() 
+                    for i in list(chords.keys()): chords_order.append(i)
+                    chords_order.sort()
+                    print(chords, chords_order)
+                    test_chord = chords[chords_order[0]]
+                    selected_chord_index = 0
+                
+                        
+                        
+                repositioning_chord = None
+                repos_start_time = None
+                repos_offset = None
+
+            
+                    
 
         if add_direction == 1:
             button_arrow.base_surface = button_arrow_surface_up
@@ -751,57 +990,64 @@ while running:
             t0_x -= 10
         
 
-
         
 
 
         # guidelines
-        current_y = root_height
-        i = 0
+        
 
-        pygame.draw.line(window, (192, 192, 192), (max(t0_x, 0), root_height), (WIDTH, root_height))
-        freq_text: pygame.Surface = FONT.render(str(ROOT*2**i) + "Hz", True, (192, 192, 192))
-        freq_text_width = freq_text.get_width()
-        freq_rect = freq_text.get_rect()
-        if t0_x < 12+freq_text_width:
-            freq_rect.midleft = (12, current_y)
-        else:
-            freq_rect.midright = (t0_x-2, current_y)
+        
 
-        window.blit(freq_text, freq_rect)
+        drawing_intervals = {}
+        leftmost_time = -t0_x/bar_width
+        rightmost_time = (-t0_x+WIDTH)/bar_width
+        for i in range(len(keys_order)-1):
+            if Range(leftmost_time, rightmost_time).intersection(Range(keys_order[i], keys_order[i+1])):
+                drawing_intervals[Range(leftmost_time, rightmost_time).intersection(Range(keys_order[i], keys_order[i+1]))] = i
+        
+        if Range(leftmost_time, rightmost_time).intersection(Range(keys_order[-1], math.inf)):
+                drawing_intervals[Range(leftmost_time, rightmost_time).intersection(Range(keys_order[-1], math.inf))] = len(keys_order)-1
+
+        
+        #print(drawing_intervals)
+
+        for interval in drawing_intervals:
+            rt = keychanges[keys_order[drawing_intervals[interval]]]
+            current_y = root_height-math.log(rt, 2)*octave_height
+            i = 0
+            pygame.draw.line(window, (255, 255, 255), (max(t0_x, interval.start*bar_width+t0_x), current_y), ((interval.end)*bar_width+t0_x, current_y))
+            while current_y > 0:
+                
+                current_y -= octave_height
+                i += 1
+                pygame.draw.line(window, (128, 128, 128), (max(t0_x, interval.start*bar_width+t0_x), current_y), ((interval.end)*bar_width+t0_x, current_y))
+                freq_text: pygame.Surface = FONT.render(str(ROOT*2**i*rt) + "Hz", True, (BG))
+                freq_text_width = freq_text.get_width()
+                freq_rect = freq_text.get_rect()
+                if t0_x < 12+freq_text_width:
+                    freq_rect.midleft = (12, current_y)
+                else:
+                    freq_rect.midright = (t0_x-2, current_y)
+
+                #window.blit(freq_text, freq_rect)
 
 
-        while current_y > 0:
-            current_y -= octave_height
-            i += 1
-            pygame.draw.line(window, (128, 128, 128), (max(t0_x, 0), current_y), (WIDTH, current_y))
-            freq_text: pygame.Surface = FONT.render(str(ROOT*2**i) + "Hz", True, (BG))
-            freq_text_width = freq_text.get_width()
-            freq_rect = freq_text.get_rect()
-            if t0_x < 12+freq_text_width:
-                freq_rect.midleft = (12, current_y)
-            else:
-                freq_rect.midright = (t0_x-2, current_y)
+            current_y = root_height-math.log(rt, 2)*octave_height
+            i = 0
+            while current_y < HEIGHT:
+                current_y += octave_height
+                i -= 1
+                #pygame.draw.line(window, (128, 128, 128), (max(t0_x, interval.start*bar_width+t0_x), current_y), ((interval.end-interval.start)*bar_width, current_y))
+                pygame.draw.line(window, (128, 128, 128), (max(t0_x, interval.start*bar_width+t0_x), current_y), ((interval.end)*bar_width+t0_x, current_y))
+                freq_text: pygame.Surface = FONT.render(str(ROOT*2**i) + "Hz", True, (BG))
+                freq_text_width = freq_text.get_width()
+                freq_rect = freq_text.get_rect()
+                if t0_x < 12+freq_text_width:
+                    freq_rect.midleft = (12, current_y)
+                else:
+                    freq_rect.midright = (t0_x-2, current_y)
 
-            window.blit(freq_text, freq_rect)
-
-
-        current_y = root_height
-        i = 0
-        while current_y < HEIGHT:
-            current_y += octave_height
-            i -= 1
-            pygame.draw.line(window, (128, 128, 128), (max(t0_x, 0), current_y), (WIDTH, current_y))
-            pygame.draw.line(window, (128, 128, 128), (max(t0_x, 0), current_y), (WIDTH, current_y))
-            freq_text: pygame.Surface = FONT.render(str(ROOT*2**i) + "Hz", True, (BG))
-            freq_text_width = freq_text.get_width()
-            freq_rect = freq_text.get_rect()
-            if t0_x < 12+freq_text_width:
-                freq_rect.midleft = (12, current_y)
-            else:
-                freq_rect.midright = (t0_x-2, current_y)
-
-            window.blit(freq_text, freq_rect)
+                #window.blit(freq_text, freq_rect)
 
         if not paused:
             pygame.draw.line(window, (128, 128, 128), (t0_x+current_time*bar_width, 0), (t0_x+current_time*bar_width, HEIGHT))
@@ -812,19 +1058,25 @@ while running:
         min_visible_time = -t0_x / bar_width if bar_width > 0 else 0
         max_visible_time = (WIDTH - t0_x) / bar_width if bar_width > 0 else 0
         
-        for t in voice1_order:
+
+        # Calculate which chords are visible based on viewport
+        min_visible_time = -t0_x / bar_width if bar_width > 0 else 0
+        max_visible_time = (WIDTH - t0_x) / bar_width if bar_width > 0 else 0
+
+        # OPTIMIZED: Use binary search instead of linear iteration
+        visible_voice1 = find_visible_chords(voice1_order, min_visible_time, max_visible_time, voice1)
+        visible_voice2 = find_visible_chords(voice2_order, min_visible_time, max_visible_time, voice2)
+
+        # Draw only visible chords
+        for t in visible_voice1:
             chord = voice1[t]
-            # Skip chords that are outside the viewport
-            if chord.time + chord.duration < min_visible_time or chord.time > max_visible_time:
-                continue
-            chord.draw(window, root_height-math.log(chord.note.ratio, 2)*octave_height, t0_x, bar_width, octave_height, highlighted=(chord == test_chord), voicenum=0)
-        
-        for t in voice2_order:
+            chord.draw(window, root_height-math.log(chord.note.ratio, 2)*octave_height, 
+                    t0_x, bar_width, octave_height, highlighted=(chord == test_chord), voicenum=0)
+
+        for t in visible_voice2:
             chord = voice2[t]
-            # Skip chords that are outside the viewport
-            if chord.time + chord.duration < min_visible_time or chord.time > max_visible_time:
-                continue
-            chord.draw(window, root_height-math.log(chord.note.ratio, 2)*octave_height, t0_x, bar_width, octave_height, highlighted=(chord == test_chord), voicenum=1)
+            chord.draw(window, root_height-math.log(chord.note.ratio, 2)*octave_height, 
+                    t0_x, bar_width, octave_height, highlighted=(chord == test_chord), voicenum=1)
         if closest:
             drawn_ylevel = root_height - math.log(closest_ratio, 2)*octave_height
             if closest.is_silent and test_chord:
@@ -839,10 +1091,25 @@ while running:
                     pygame.draw.line(window, RED, (t0_x + bar_width*(test_chord.time), drawn_ylevel), (t0_x + bar_width*(test_chord.time + test_chord.duration), drawn_ylevel), 5)
         pygame.draw.line(window, (128, 128, 128), (t0_x, 0), (t0_x, HEIGHT), 3)
 
+        for time in keychanges:
+            pygame.draw.line(window, (128, 128, 128), (t0_x+bar_width*(time), 0), (t0_x+bar_width*(time), HEIGHT), 3)
+            #pygame.draw.line(window, (128, 128, 128), (t0_x+bar_width*(time), HEIGHT-150), (t0_x+bar_width*(time), HEIGHT), 3)
+        
+        
+
+
         window.blit(bg_surface, bg_surface.get_rect())
-        window.blit(title_text, title_rect)
+        
         #window.blit(title_text2, title_rect2)
         #pygame.draw.line(window, ACCENT, (title_rect.right + 5, 10), (title_rect.right+5, 40), 1)
+        for time in keychanges:
+            pygame.draw.line(window, (128, 128, 128), (t0_x+bar_width*(time), HEIGHT-140), (t0_x+bar_width*(time), HEIGHT-90), 3)
+        
+        for chord in chords:
+            pygame.draw.rect(window, (255, 255, 255), pygame.Rect((t0_x+bar_width*chords[chord].time), (HEIGHT-140), chords[chord].duration*bar_width, 50), border_radius=10)
+        if not paused:
+            pygame.draw.line(window, (128, 128, 128), (t0_x+current_time*bar_width, HEIGHT-140), (t0_x+current_time*bar_width, HEIGHT-90))
+        window.blit(other_layer, (0, 0))
 
         pygame.draw.rect(window, ACCENT, pygame.Rect(title_rect.right + 5, 10, WIDTH-10-(title_rect.right + 5), 30), border_radius=10)
         pygame.draw.rect(window, ACCENT, pygame.Rect(10, 50, 200, 50), border_top_left_radius=10, border_top_right_radius=10)
@@ -931,14 +1198,21 @@ while running:
             info_rect = info_text.get_rect()
             info_rect.topleft = (140, 10)
             window.blit(info_text, info_rect)
+        elif resizing_chord:
+            info_text = get_font(30).render(f"duration: {(resizing_chord.duration)} beats", True, BG)
+            info_rect = info_text.get_rect()
+            info_rect.topleft = (140, 10)
+            window.blit(info_text, info_rect)
         else:
-            if closest:
-                note_info_text = get_font(30).render(f"{ROOT}Hz X {closest_ratio}", True, BG)
+            if closest and test_chord:
+                current_key = find_key(test_chord.time)
+                #print(current_key)
+                note_info_text = get_font(30).render(f"{int(ROOT*current_key)}Hz X {closest_ratio/current_key}", True, BG)
                 note_info_rect = note_info_text.get_rect()
                 note_info_rect.topleft = (140, 10)
                 window.blit(note_info_text, note_info_rect)
 
-                note_name_text = get_font(30).render(f"{name_ratio(closest_ratio)}", True, BG)
+                note_name_text = get_font(30).render(f"{name_ratio(closest_ratio/current_key)}", True, BG)
                 note_name_rect = note_name_text.get_rect()
                 note_name_rect.topright = (WIDTH-20, 10)
                 window.blit(note_name_text, note_name_rect)
@@ -950,7 +1224,7 @@ while running:
             button.update((mouse_x, mouse_y), mouse_pressed)
             button.draw(window)
         
-        if current_menu == "addchord":
+        if current_menu == "addchord" or current_menu == "addkeysig":
             #pygame.draw.rect(window, (0, 0, 0, 128), pygame.Rect(0, 0, WIDTH, HEIGHT))
             pygame.draw.rect(window, BG, pygame.Rect(WIDTH//4, HEIGHT//4-50, WIDTH//2, HEIGHT//2+100), border_radius=10)
             menu_title_surf = get_font(30).render("ADD CHORD", True, ACCENT)
@@ -982,10 +1256,24 @@ while running:
             window.blit(ratio_text, ratio_rect)
             #print(add_chord_ratio)
 
+        try:
+            playback_key = find_key(current_time)
+            voice1_text = get_shasavic(30).render(visualise_ratio(voice1[voice1_order[voice1_playback_idx]].note.ratio / playback_key, ignore_twos=True), True, (255, 255, 255))
+            voice1_rect = voice1_text.get_rect()
+            voice1_rect.topright = (WIDTH-30, 120)
+            window.blit(voice1_text, voice1_rect)
+            voice2_text = get_shasavic(30).render(visualise_ratio(voice2[voice2_order[voice2_playback_idx]].note.ratio / playback_key, True), True, RED)
+            voice2_rect = voice2_text.get_rect()
+            voice2_rect.topright = (WIDTH-30, 160)
+            window.blit(voice2_text, voice2_rect)
+        except Exception as e:
+            pass
 
+    window.blit(title_text, title_rect)
     pygame.display.flip()
     clock.tick()  # 60 FPS
     #print(clock.get_fps())
+   
     
     if not paused:
         current_time += clock.get_time() / 1000
@@ -993,8 +1281,8 @@ while running:
         voice2_chord = find_chord(current_time, 2)
         
         # cache pitches
-        voice1_pitches = voice1_chord.note.get_pitches(voice1_chord.note.ratio * ROOT) if voice1_chord else set()
-        voice2_pitches = voice2_chord.note.get_pitches(voice2_chord.note.ratio * ROOT) if voice2_chord else set()
+        voice1_pitches = voice1_chord.get_freqs(voice1_chord.note.ratio * ROOT) if voice1_chord else set()
+        voice2_pitches = voice2_chord.get_freqs(voice2_chord.note.ratio * ROOT) if voice2_chord else set()
         
         # Update voice 1
         if voice1_chord and current_time <= voice1_chord.duration + voice1_chord.time:
@@ -1025,8 +1313,6 @@ while running:
             # turn everything off
             for freq in list(synthesizer2.active_notes.keys()):
                 synthesizer2.note_off(freq)
-
-    print(voice1_playback_idx)
     #if closest: print(closest.parent)
 
 synthesizer.stop()

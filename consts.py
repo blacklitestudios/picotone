@@ -20,6 +20,30 @@ ACCENT = (92, 89, 107)
 RATIOS = [None, Fraction(2), Fraction(3/2), Fraction(5/4), Fraction(7/4), Fraction(11/4), Fraction(13/4)]
 INTERVALLENGTHS = [None, OCTAVE, PERFECTFIFTH, MAJORTHIRD, SEVENTH, ELEVENTH, THIRTEENTH]
 
+RESIZE_EDGE_THRESHOLD = 10
+
+WIDTH = 1280
+HEIGHT = 720
+# graphics settings
+octave_height = 120
+bar_width = 100
+root_height = HEIGHT // 2
+t0_x = 0
+
+closest = None
+# voices: map time -> Chord, plus ordered list of times for indexing/navigation
+voice1 = {}
+voice2 = {}
+voice1_order = []
+voice2_order = []
+# chords points to the current voice dict and chords_order to its ordered timestamps
+chords = voice1
+chords_order = voice1_order
+selected_chord_index = 0
+
+voice1_current_chord = 0
+voice2_current_chord = 0
+
 def draw_dotted_line(surface, color, start_pos, end_pos, width=1, dash_length=10, gap_length=5):
     """
     Draw a dotted line on a pygame surface.

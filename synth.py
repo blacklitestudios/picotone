@@ -120,7 +120,7 @@ class PolyphonicSynth:
     
     def note_on(self, frequency, velocity=0.7):
         """Start playing a note"""
-        print("on", frequency)
+        #print("on", frequency)
         # Allow re-triggering of existing notes even if at polyphony limit
         if frequency not in self.active_notes and len(self.active_notes) >= self.polyphony:
             # Polyphony limit reached for new notes
@@ -131,7 +131,7 @@ class PolyphonicSynth:
     
     def note_off(self, frequency):
         """Stop playing a note"""
-        print("off", frequency)
+        #print("off", frequency)
         with self.voice_lock:
             if frequency in self.active_notes:
                 voice_idx = self.active_notes[frequency][0]
@@ -307,7 +307,7 @@ if __name__ == "__main__":
     try:
         synth.start()
         
-        print("Playing a chord...")
+        #("Playing a chord...")
         # Play a C major chord
         synth.note_on(frequency_from_note('C4'))  # C4
         synth.note_on(frequency_from_note('E4'))  # E4
@@ -320,7 +320,7 @@ if __name__ == "__main__":
         synth.note_off(frequency_from_note('G4'))
         time.sleep(0.5)
         
-        print("Playing arpeggio...")
+        #print("Playing arpeggio...")
         # Arpeggio example
         notes = ['C4', 'E4', 'G4', 'C5', 'G4', 'E4']
         for note in notes:
@@ -331,7 +331,7 @@ if __name__ == "__main__":
         
         time.sleep(1)
         
-        print("Playing with different waveform...")
+        #print("Playing with different waveform...")
         synth.set_waveform('square')
         for note in ['A3', 'C4', 'E4']:
             synth.note_on(frequency_from_note(note), velocity=0.5)
@@ -342,7 +342,7 @@ if __name__ == "__main__":
             synth.note_off(frequency_from_note(note))
         time.sleep(1)
         
-        print("Synth demo complete.")
+        #print("Synth demo complete.")
         
     except KeyboardInterrupt:
         print("\nStopping synth...")
